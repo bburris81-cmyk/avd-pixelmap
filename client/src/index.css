@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 15% 10%;
+    --foreground: 0 0% 95%;
+
+    --card: 220 15% 14%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 220 15% 14%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 0 85% 45%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 15% 20%;
+    --secondary-foreground: 0 0% 85%;
+
+    --muted: 220 15% 18%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 0 85% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 85% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 15% 22%;
+    --input: 220 15% 18%;
+    --ring: 0 85% 45%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+.avd-red { color: #dc1a1a; }
+.avd-panel {
+  background: hsl(220, 15%, 14%);
+  border: 1px solid hsl(220, 15%, 22%);
+  border-radius: 0.5rem;
+}
+.preview-canvas {
+  background: #000;
+  position: relative;
+  overflow: visible;
+  border: 2px solid hsl(220, 15%, 22%);
+  border-radius: 6px;
+}
+.preview-media {
+  background: #464646;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+.preview-label {
+  position: absolute;
+  font-family: 'Verdana', sans-serif;
+  font-weight: 700;
+  color: #dc1a1a;
+  text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+  white-space: nowrap;
+  pointer-events: none;
+}
