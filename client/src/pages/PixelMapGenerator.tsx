@@ -3,6 +3,27 @@ import avdLogoDark from "@assets/avd-logo-dark.png";
 import type { PixelMapInput } from "../../../shared/schema";
 import { downloadRenderedPng } from "../lib/canvas-renderer";
 
+// ── Preview cut-off guard: measure label text, shrink to fit, clamp inside a region
+let measureCtx: CanvasRenderingContext2D | null = null;
+function measureLabel(text: string, fontSize: number): number {
+  if (!measureCtx) measureCtx = document.createElement("canvas").getContext("2d");
+  if (!measureCtx) return text.length * fontSize * 0.62;
+  measureCtx.font = `bold ${fontSize}px Verdana`;
+  return measureCtx.measureText(text).width;
+}
+/** Returns font size and center X so the widest line fits fully between x0 and x1. */
+function fitLabel(lines: string[], fontSize: number, cx: number, x0: number, x1: number, minFs = 5) {
+  const pad = 4;
+  const avail = Math.max(0, x1 - x0 - pad * 2);
+  let fs = fontSize;
+  const widest = (f: number) => Math.max(...lines.map(l => measureLabel(l, f)));
+  while (fs > minFs && widest(fs) > avail) fs -= 0.5;
+  const half = widest(fs) / 2 + pad;
+  const lo = x0 + half, hi = x1 - half;
+  const x = lo > hi ? (x0 + x1) / 2 : Math.min(hi, Math.max(lo, cx));
+  return { fs, x };
+}
+
 type InputMode = "tile" | "direct";
 
 const CANVAS_PRESETS = [
@@ -274,14 +295,23 @@ export default function PixelMapGenerator() {
             </div>
 
             {/* "Viewable Media" label */}
-            <span
-              className="preview-label"
-              style={{
-                left: Math.min(prevMediaW, PREVIEW_W) / 2 - 60,
-                top:  Math.min(prevMediaH, PREVIEW_H) / 2 - 8,
-                fontSize: baseLabelFont + 4,
-              }}
-            >Viewable Media</span>
+            {(() => {
+              const visW = Math.min(prevMediaW, PREVIEW_W);
+              // Keep clear of the vertical media-height label on the left edge
+              const vm = fitLabel(["Viewable Media"], baseLabelFont + 4, visW / 2, Math.min(18, visW / 4), visW);
+              return (
+                <span
+                  className="preview-label"
+                  style={{
+                    left: vm.x,
+                    top:  Math.min(prevMediaH, PREVIEW_H) / 2,
+                    transform: "translate(-50%,-50%)",
+                    fontSize: vm.fs,
+                    whiteSpace: "nowrap",
+                  }}
+                >Viewable Media</span>
+              );
+            })()}
 
             {/* Instruction block — in the larger black region */}
             {(canvasW > mediaW || canvasH > mediaH) && (() => {
@@ -331,20 +361,22 @@ export default function PixelMapGenerator() {
 
               if (rightW > 0 && bottomH > 0) {
                 if (bottomArea >= rightArea && rightW > 30) {
-                  const nmFs = Math.min(fs, Math.max(5, Math.round(rightW / 12)));
+                  const nm = fitLabel(["No Media", "Leave Black"], fs, prevMediaW + rightW / 2, prevMediaW, PREVIEW_W - 14);
                   return (
                     <span className="preview-label" style={{
-                      left: prevMediaW + rightW / 2, top: prevMediaH / 2,
+                      left: nm.x, top: prevMediaH / 2,
                       transform: "translate(-50%,-50%)",
-                      fontSize: nmFs, textAlign: "center", lineHeight: "1.3",
+                      fontSize: nm.fs, textAlign: "center", lineHeight: "1.3", whiteSpace: "nowrap",
                     }}>No Media<br/>Leave Black</span>
                   );
                 } else if (rightArea > bottomArea && bottomH > 15) {
+                  // Centered under the media, clamped so it never runs off the canvas edge
+                  const nm = fitLabel(["No Media — Leave Black"], fs, prevMediaW / 2, 0, PREVIEW_W);
                   return (
                     <span className="preview-label" style={{
-                      left: prevMediaW / 2, top: prevMediaH + bottomH / 2,
+                      left: nm.x, top: prevMediaH + bottomH / 2,
                       transform: "translate(-50%,-50%)",
-                      fontSize: fs, textAlign: "center", lineHeight: "1.3",
+                      fontSize: nm.fs, textAlign: "center", lineHeight: "1.3", whiteSpace: "nowrap",
                     }}>No Media — Leave Black</span>
                   );
                 }

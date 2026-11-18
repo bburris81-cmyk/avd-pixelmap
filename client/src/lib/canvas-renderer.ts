@@ -24,8 +24,18 @@ function clearShadow(ctx: CanvasRenderingContext2D) {
   ctx.shadowOffsetY = 0;
 }
 
+export interface TextBounds { x0: number; y0: number; x1: number; y1: number; }
+
+/** Every label drawn on the current pixel map, for the post-render cut-off audit. */
+let drawnLabels: { text: string; box: TextBounds }[] = [];
+
 /**
  * Draw text centered on (cx, cy). Optionally rotated -90° for vertical labels.
+ *
+ * Cut-off guard: before drawing, the text is measured. If it is wider than the
+ * allowed region (bounds, or the whole canvas by default) the font shrinks until
+ * it fits, then the center is clamped so the full text box stays inside the
+ * region. No label can run off the canvas edge.
  */
 function drawText(
   ctx: CanvasRenderingContext2D,
@@ -35,13 +45,44 @@ function drawText(
   fontSize: number,
   color: string,
   shadow: boolean,
-  vertical = false
+  vertical = false,
+  bounds?: TextBounds
 ) {
+  const cW = ctx.canvas.width;
+  const cH = ctx.canvas.height;
+  // Region is always intersected with the canvas itself
+  const b: TextBounds = {
+    x0: Math.max(0, bounds?.x0 ?? 0),
+    y0: Math.max(0, bounds?.y0 ?? 0),
+    x1: Math.min(cW, bounds?.x1 ?? cW),
+    y1: Math.min(cH, bounds?.y1 ?? cH),
+  };
+  const pad = Math.max(6, Math.round(fontSize * 0.25));
+  const along = (vertical ? b.y1 - b.y0 : b.x1 - b.x0) - pad * 2;
+
+  // Shrink font until the text fits along its axis
+  let fs = fontSize;
+  ctx.font = `bold ${fs}px Verdana`;
+  while (fs > 8 && ctx.measureText(text).width > along) {
+    fs -= 1;
+    ctx.font = `bold ${fs}px Verdana`;
+  }
+  const textW = ctx.measureText(text).width;
+  const textH = fs * 1.2;
+  const halfX = (vertical ? textH : textW) / 2 + pad;
+  const halfY = (vertical ? textW : textH) / 2 + pad;
+
+  // Clamp center so the whole text box stays inside the region
+  const clamp = (v: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)));
+  const x = clamp(cx, b.x0 + halfX, b.x1 - halfX);
+  const y = clamp(cy, b.y0 + halfY, b.y1 - halfY);
+  drawnLabels.push({ text, box: { x0: x - halfX + pad, y0: y - halfY + pad, x1: x + halfX - pad, y1: y + halfY - pad } });
+
   ctx.save();
-  ctx.translate(cx, cy);
+  ctx.translate(x, y);
   if (vertical) ctx.rotate(-Math.PI / 2);
 
-  ctx.font = `bold ${fontSize}px Verdana`;
+  ctx.font = `bold ${fs}px Verdana`;
   ctx.fillStyle = color;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -54,6 +95,13 @@ function drawText(
   ctx.restore();
 }
 
+/** Post-render check: returns any label whose box extends past the canvas edge. */
+export function auditTextBounds(cW: number, cH: number): string[] {
+  return drawnLabels
+    .filter(({ box }) => box.x0 < 0 || box.y0 < 0 || box.x1 > cW || box.y1 > cH)
+    .map(({ text }) => text);
+}
+
 // ── Pixel Map ────────────────────────────────────────────────────────────────
 
 export function renderPixelMap(input: PixelMapInput): HTMLCanvasElement {
@@ -63,6 +111,7 @@ export function renderPixelMap(input: PixelMapInput): HTMLCanvasElement {
   canvas.width = cW;
   canvas.height = cH;
   const ctx = canvas.getContext("2d")!;
+  drawnLabels = [];
 
   // ── Black canvas background
   ctx.fillStyle = "#000000";
@@ -80,7 +129,8 @@ export function renderPixelMap(input: PixelMapInput): HTMLCanvasElement {
   // ── "Viewable Media" center label — clamp to visible canvas area
   const vmCx = Math.min(mW, cW) / 2;
   const vmCy = Math.min(mH, cH) / 2;
-  drawText(ctx, "Viewable Media", vmCx, vmCy, labelFont, RED, true);
+  drawText(ctx, "Viewable Media", vmCx, vmCy, labelFont, RED, true, false,
+    { x0: dimFont * 2.5, y0: 0, x1: Math.min(mW, cW), y1: Math.min(mH, cH) });
 
   // ── Dynamic placement: instructions in larger black region, No Media in smaller
   const rightW  = Math.max(0, cW - mW);
@@ -105,12 +155,15 @@ export function renderPixelMap(input: PixelMapInput): HTMLCanvasElement {
       // Right strip: fit text to available width, center within media height to avoid canvas-height label
       const nmFont = fitFont("Leave Black", instrFont, rightW - 20);
       const nmCy = Math.min(mH, cH) / 2;
-      drawText(ctx, "No Media",    mW + rightW / 2, nmCy - nmFont * 0.6, nmFont, RED, false);
-      drawText(ctx, "Leave Black", mW + rightW / 2, nmCy + nmFont * 0.6, nmFont, RED, false);
+      const rightBox = { x0: mW, y0: 0, x1: cW - dimFont * 2.5, y1: cH };
+      drawText(ctx, "No Media",    mW + rightW / 2, nmCy - nmFont * 0.6, nmFont, RED, false, false, rightBox);
+      drawText(ctx, "Leave Black", mW + rightW / 2, nmCy + nmFont * 0.6, nmFont, RED, false, false, rightBox);
     } else if (rightArea > bottomArea && bottomH > 80) {
       // Bottom strip: fit text to available width
       const nmFont = fitFont("No Media — Leave Black", instrFont, cW * 0.9);
-      drawText(ctx, "No Media — Leave Black", mW / 2, mH + bottomH / 2, nmFont, RED, false);
+      // Centered under the media area, but clamped so it never runs off the left/right edge
+      drawText(ctx, "No Media — Leave Black", mW / 2, mH + bottomH / 2, nmFont, RED, false, false,
+        { x0: 0, y0: mH, x1: cW, y1: cH - (dimFont * 1.5 + 8) });
     }
   }
 
@@ -170,6 +223,10 @@ export function renderPixelMap(input: PixelMapInput): HTMLCanvasElement {
   if (bottomH > 0) {
     ctx.beginPath(); ctx.moveTo(0, mH); ctx.lineTo(Math.min(mW, cW), mH); ctx.stroke();
   }
+
+  // ── Final cut-off check: every label must sit fully inside the canvas
+  const clipped = auditTextBounds(cW, cH);
+  if (clipped.length) console.warn("Pixel map text outside canvas:", clipped);
 
   return canvas;
 }
